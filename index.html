@@ -1,0 +1,1109 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistema de Tickets de Almuerzo - Firebase</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body>
+    <div id="app"></div>
+    
+    <script type="module">
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
+        import { getFirestore, collection, addDoc, getDocs, updateDoc, doc, deleteDoc, onSnapshot } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+        import * as XLSX from 'https://cdn.sheetjs.com/xlsx-0.20.0/package/xlsx.mjs';
+
+        // Configuración Firebase
+        const firebaseConfig = {
+            apiKey: "AIzaSyDdjGkVMlGHnGMKunrnPSiG29VG-M9eCW4",
+            authDomain: "ticketsalmuerzo.firebaseapp.com",
+            projectId: "ticketsalmuerzo",
+            storageBucket: "ticketsalmuerzo.firebasestorage.app",
+            messagingSenderId: "865523116457",
+            appId: "1:865523116457:web:63f5914ce980dff5647cb8"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
+        // Estado global
+        let currentUser = null;
+        let userType = null;
+        let employees = [];
+        let tickets = [];
+        let ticketUsage = [];
+        let selectedMonth = '2025-01';
+        const ADMIN_CODE = 'ADMIN2025';
+
+        // Cargar datos desde Firebase
+        async function loadEmployees() {
+            const snap = await getDocs(collection(db, 'employees'));
+            employees = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+            console.log('Empleados cargados:', employees.length);
+        }
+
+        async function loadTickets() {
+            const snap = await getDocs(collection(db, 'tickets'));
+            tickets = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+            console.log('Tickets cargados:', tickets.length);
+        }
+
+        async function loadUsage() {
+            const snap = await getDocs(collection(db, 'ticketUsage'));
+            ticketUsage = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        }
+
+        // Escuchar cambios en tiempo real
+        onSnapshot(collection(db, 'employees'), () => { loadEmployees().then(() => { if (userType === 'admin') renderAdmin(); }); });
+        onSnapshot(collection(db, 'tickets'), () => { loadTickets().then(() => { if (userType === 'admin') renderAdmin(); if (userType === 'employee') renderEmployee(); }); });
+        onSnapshot(collection(db, 'ticketUsage'), () => { loadUsage().then(() => { if (userType === 'employee') renderEmployee(); }); });
+
+        // Utilidades
+        function generateQR() {
+            return `QR-EMP${Math.floor(Math.random() * 100000).toString().padStart(5, '0')}-${new Date().getFullYear()}`;
+        }
+
+        function generateTicketCode() {
+            const d = new Date();
+            return `TKT-${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${Math.floor(Math.random() * 10000).toString().padStart(4, '0')}`;
+        }
+
+        function getMonths() {
+            const months = [];
+            for (let i = 0; i < 24; i++) {
+                const d = new Date(2025, i, 1);
+                const key = d.toISOString().slice(0, 7);
+                const name = d.toLocaleDateString('es', { month: 'long', year: 'numeric' });
+                months.push({ key, name: name.charAt(0).toUpperCase() + name.slice(1) });
+            }
+            return months;
+        }
+
+        // Función para parsear fecha sin problemas de zona horaria
+        function parseLocalDate(dateStr) {
+            const [year, month, day] = dateStr.split('-').map(Number);
+            return new Date(year, month - 1, day);
+        }
+
+        // Función para formatear fecha localmente
+        function formatLocalDate(dateStr, options = {}) {
+            return parseLocalDate(dateStr).toLocaleDateString('es', options);
+        }
+
+        // LOGIN
+        function renderLogin() {
+            document.getElementById('app').innerHTML = `
+                <div class="min-h-screen bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center p-4">
+                    <div class="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full">
+                        <div class="text-center mb-8">
+                            <h1 class="text-3xl font-bold mb-2">Sistema de Tickets</h1>
+                            <p class="text-gray-600">Control de Almuerzos</p>
+                        </div>
+                        <div id="loginBox"></div>
+                    </div>
+                </div>
+            `;
+            showLoginButtons();
+        }
+
+        function showLoginButtons() {
+            document.getElementById('loginBox').innerHTML = `
+                <div class="space-y-3">
+                    <button onclick="showQRInput()" class="w-full bg-blue-600 text-white py-4 rounded-lg hover:bg-blue-700 font-semibold">
+                        👥 Acceso Colaboradores
+                    </button>
+                    <button onclick="showQRInput('${ADMIN_CODE}')" class="w-full bg-purple-600 text-white py-4 rounded-lg hover:bg-purple-700 font-semibold">
+                        🔐 Acceso Administrador
+                    </button>
+                </div>
+            `;
+        }
+
+        window.showQRInput = function(code = '') {
+            document.getElementById('loginBox').innerHTML = `
+                <div class="space-y-4">
+                    <div class="bg-blue-50 p-6 rounded-lg border-2 border-blue-200">
+                        <div class="text-6xl text-center mb-4">📱</div>
+                        <input type="text" id="qrCode" value="${code}" placeholder="QR-EMP001-2025" 
+                            class="w-full p-3 border-2 rounded-lg text-center font-mono" autofocus>
+                        <div class="mt-4 bg-yellow-50 p-3 rounded text-xs">
+                            <p class="font-bold">Códigos:</p>
+                            <p>Colaboradores: QR-EMP001-2025</p>
+                            <p class="font-bold">Admin: ${ADMIN_CODE}</p>
+                        </div>
+                    </div>
+                    <div class="flex gap-2">
+                        <button onclick="doLogin()" class="flex-1 bg-green-600 text-white py-3 rounded-lg font-semibold">Acceder</button>
+                        <button onclick="showLoginButtons()" class="flex-1 bg-gray-300 py-3 rounded-lg font-semibold">Cancelar</button>
+                    </div>
+                </div>
+            `;
+        };
+
+        window.showLoginButtons = showLoginButtons;
+
+        window.doLogin = async function() {
+            const code = document.getElementById('qrCode').value.trim();
+            if (code === ADMIN_CODE) {
+                userType = 'admin';
+                currentUser = { name: 'Administrador' };
+                await Promise.all([loadEmployees(), loadTickets(), loadUsage()]);
+                renderAdmin();
+            } else {
+                const emp = employees.find(e => e.qrCode === code);
+                if (emp) {
+                    userType = 'employee';
+                    currentUser = emp;
+                    await Promise.all([loadTickets(), loadUsage()]);
+                    renderEmployee();
+                } else {
+                    alert('Código QR no válido');
+                }
+            }
+        };
+
+        window.logout = function() {
+            currentUser = null;
+            userType = null;
+            renderLogin();
+        };
+
+        // PANEL EMPLEADO
+        function renderEmployee() {
+            const activeTicket = tickets.find(t => t.employeeId === currentUser.id && t.status === 'active');
+            const myUsage = ticketUsage.filter(u => u.employeeId === currentUser.id).sort((a, b) => parseLocalDate(b.date) - parseLocalDate(a.date));
+            const isExpired = activeTicket ? parseLocalDate(activeTicket.expirationDate) < new Date() : false;
+            const ticketsExhausted = activeTicket && activeTicket.hasLimit && (activeTicket.usedDays || 0) >= activeTicket.maxTickets;
+
+            document.getElementById('app').innerHTML = `
+                <div class="min-h-screen bg-gray-100">
+                    <div class="bg-blue-600 text-white p-4">
+                        <div class="container mx-auto flex justify-between items-center">
+                            <h1 class="text-2xl font-bold">Mi Área Personal</h1>
+                            <button onclick="logout()" class="px-4 py-2 rounded hover:bg-blue-700">🚪 Salir</button>
+                        </div>
+                    </div>
+                    <div class="container mx-auto p-4">
+                        <div class="bg-white rounded-lg shadow p-6">
+                            <div class="bg-blue-50 p-4 rounded mb-6">
+                                <p class="text-lg"><strong>Bienvenido:</strong> ${currentUser.name}</p>
+                                <p><strong>Departamento:</strong> ${currentUser.department}</p>
+                                <div class="flex items-center gap-2 mt-2">
+                                    <p class="text-sm text-gray-600">QR: ${currentUser.qrCode}</p>
+                                    <button onclick="showQRCode('${currentUser.qrCode}', '${currentUser.name}')" 
+                                        class="bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700">
+                                        Ver QR 📱
+                                    </button>
+                                </div>
+                            </div>
+                            ${activeTicket ? `
+                                <div class="relative bg-gradient-to-br from-blue-500 to-blue-700 rounded-2xl shadow-2xl overflow-hidden mb-6">
+                                    ${isExpired ? '<div class="absolute inset-0 flex items-center justify-center z-10"><div class="text-red-600 font-black text-8xl opacity-20 transform -rotate-45">VENCIDO</div></div>' : ''}
+                                    ${ticketsExhausted ? '<div class="absolute inset-0 flex items-center justify-center z-10"><div class="text-orange-600 font-black text-7xl opacity-20 transform -rotate-45">AGOTADOS</div></div>' : ''}
+                                    <div class="p-8 text-white relative">
+                                        <div class="mb-6">
+                                            <p class="text-sm uppercase opacity-80">Ticket de Almuerzo</p>
+                                            <p class="font-mono text-lg">${activeTicket.ticketCode}</p>
+                                        </div>
+                                        <div class="mb-6">
+                                            <p class="text-sm opacity-80">Colaborador</p>
+                                            <p class="text-3xl font-bold">${currentUser.name}</p>
+                                        </div>
+                                        <div class="bg-white bg-opacity-20 rounded-lg p-4 mb-6">
+                                            <p class="text-sm opacity-90 mb-1">Fecha de Caducidad</p>
+                                            <p class="text-4xl font-black">${formatLocalDate(activeTicket.expirationDate, {day:'2-digit', month:'short', year:'numeric'}).toUpperCase()}</p>
+                                        </div>
+                                        ${activeTicket.hasLimit ? `
+                                            <div class="bg-white bg-opacity-20 rounded-lg p-4 mb-6">
+                                                <div class="flex justify-between items-center mb-2">
+                                                    <span class="text-sm opacity-90">Tickets Disponibles</span>
+                                                    <span class="text-2xl font-black">${Math.max(0, activeTicket.maxTickets - (activeTicket.usedDays || 0))} / ${activeTicket.maxTickets}</span>
+                                                </div>
+                                                <div class="w-full bg-white bg-opacity-30 rounded-full h-3 overflow-hidden">
+                                                    <div class="bg-white h-full rounded-full transition-all duration-300" style="width: ${Math.min(100, ((activeTicket.usedDays || 0) / activeTicket.maxTickets) * 100)}%"></div>
+                                                </div>
+                                            </div>
+                                        ` : ''}
+                                        <div class="flex justify-between text-sm opacity-80">
+                                            <span>Días usados: ${activeTicket.usedDays || 0}</span>
+                                            <span>${!isExpired && !ticketsExhausted ? '● ACTIVO' : '○ INACTIVO'}</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <button onclick="useTicketNow()" ${ticketsExhausted || isExpired ? 'disabled' : ''} class="w-full ${ticketsExhausted || isExpired ? 'bg-gray-400 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700'} text-white py-4 rounded-lg font-semibold mb-6">
+                                    ${ticketsExhausted ? '🚫 Tickets Agotados' : isExpired ? '🚫 Ticket Vencido' : '✓ Usar Ticket Hoy'}
+                                </button>
+                                <div class="border rounded-lg p-4">
+                                    <h3 class="font-bold mb-4">📊 Historial</h3>
+                                    ${myUsage.length > 0 ? myUsage.map(u => `
+                                        <div class="flex justify-between bg-gray-50 p-3 rounded mb-2">
+                                            <span>${formatLocalDate(u.date)}</span>
+                                            <span class="text-sm text-gray-600">${u.time}</span>
+                                        </div>
+                                    `).join('') : '<p class="text-gray-500 text-center py-4">Sin usos</p>'}
+                                </div>
+                            ` : '<div class="bg-yellow-50 border-2 border-yellow-200 rounded-lg p-8 text-center"><p class="text-xl font-semibold">No tienes ticket activo</p></div>'}
+                        </div>
+                    </div>
+                    <div id="popup" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50"></div>
+                    <div id="modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50"></div>
+                </div>
+            `;
+        }
+
+        window.useTicketNow = async function() {
+            const today = new Date().toISOString().split('T')[0];
+            const ticket = tickets.find(t => t.employeeId === currentUser.id && t.status === 'active' && parseLocalDate(t.expirationDate) >= new Date());
+            
+            if (!ticket) { alert('No tienes ticket activo'); return; }
+            if (ticketUsage.find(u => u.employeeId === currentUser.id && u.date === today)) { alert('Ya usaste tu ticket hoy'); return; }
+            
+            // Verificar si tiene límite y si se agotaron
+            if (ticket.hasLimit && (ticket.usedDays || 0) >= ticket.maxTickets) {
+                alert('🚫 Tickets agotados. Contacta con el administrador.');
+                return;
+            }
+
+            document.getElementById('popup').innerHTML = `
+                <div class="bg-white rounded-2xl p-8 max-w-md w-full">
+                    <div class="text-center mb-6">
+                        <div class="text-6xl mb-4">✅</div>
+                        <h2 class="text-2xl font-bold text-green-600">Ticket Válido</h2>
+                    </div>
+                    <div class="bg-green-100 rounded-xl p-6 mb-6 border-2 border-green-300">
+                        <p class="text-center text-sm text-gray-600 mb-2">Fecha</p>
+                        <p class="text-3xl font-black text-green-700 text-center">${formatLocalDate(today, {weekday:'long', day:'2-digit', month:'long', year:'numeric'}).toUpperCase()}</p>
+                        <div class="border-t-2 border-green-300 mt-4 pt-4">
+                            <p class="text-center text-sm"><strong>${currentUser.name}</strong></p>
+                            <p class="text-center text-xs text-gray-600">${ticket.ticketCode}</p>
+                        </div>
+                    </div>
+                    <div class="flex gap-3">
+                        <button onclick="confirmUse('${ticket.id}', '${today}')" class="flex-1 bg-green-600 text-white py-3 rounded-lg font-semibold">Confirmar</button>
+                        <button onclick="closePopup()" class="flex-1 bg-gray-300 py-3 rounded-lg font-semibold">Cancelar</button>
+                    </div>
+                </div>
+            `;
+            document.getElementById('popup').classList.remove('hidden');
+        };
+
+        window.confirmUse = async function(ticketId, date) {
+            const now = new Date();
+            await addDoc(collection(db, 'ticketUsage'), {
+                ticketId, 
+                employeeId: currentUser.id, 
+                date, 
+                time: `${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')}`
+            });
+            const ticket = tickets.find(t => t.id === ticketId);
+            await updateDoc(doc(db, 'tickets', ticketId), { usedDays: (ticket.usedDays || 0) + 1 });
+            closePopup();
+            alert('✅ Ticket usado');
+        };
+
+        window.closePopup = function() {
+            document.getElementById('popup').classList.add('hidden');
+        };
+
+        // PANEL ADMIN
+        function renderAdmin() {
+            const months = getMonths();
+            const monthEmps = employees.filter(e => e.registrationDate && e.registrationDate.slice(0, 7) === selectedMonth);
+            const monthTickets = tickets.filter(t => t.requestDate && t.requestDate.slice(0, 7) === selectedMonth);
+
+            document.getElementById('app').innerHTML = `
+                <div class="min-h-screen bg-gray-100">
+                    <div class="bg-blue-600 text-white p-4">
+                        <div class="container mx-auto flex justify-between">
+                            <h1 class="text-2xl font-bold">Panel Admin</h1>
+                            <button onclick="logout()" class="px-4 py-2 rounded hover:bg-blue-700">🚪 Salir</button>
+                        </div>
+                    </div>
+                    <div class="container mx-auto p-4">
+                        <div class="bg-white rounded-lg shadow p-6">
+                            <div class="mb-6 flex gap-2 items-center flex-wrap">
+                                <select onchange="changeMonth(this.value)" class="p-3 border-2 rounded-lg font-semibold">
+                                    ${months.map(m => `<option value="${m.key}" ${m.key === selectedMonth ? 'selected' : ''}>${m.name}</option>`).join('')}
+                                </select>
+                                <button onclick="cleanDB()" class="bg-red-600 text-white px-4 py-2 rounded-lg">🗑️ Limpiar BD</button>
+                            </div>
+                            
+                            <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                                <div class="bg-blue-100 p-4 rounded">
+                                    <p class="text-sm">Colaboradores</p>
+                                    <p class="text-3xl font-bold">${monthEmps.length}</p>
+                                </div>
+                                <div class="bg-purple-100 p-4 rounded">
+                                    <p class="text-sm">Tickets</p>
+                                    <p class="text-3xl font-bold">${monthTickets.length}</p>
+                                </div>
+                                <div class="bg-green-100 p-4 rounded">
+                                    <p class="text-sm">Activos</p>
+                                    <p class="text-3xl font-bold">${monthTickets.filter(t => t.status === 'active').length}</p>
+                                </div>
+                                <div class="bg-orange-100 p-4 rounded">
+                                    <p class="text-sm">Total BD</p>
+                                    <p class="text-3xl font-bold">${employees.length}</p>
+                                </div>
+                            </div>
+
+                            <div class="flex gap-2 mb-4 flex-wrap">
+                                <button onclick="showAddEmp()" class="bg-blue-600 text-white px-6 py-3 rounded-lg">➕ Agregar</button>
+                                <button onclick="showUploadExcel()" class="bg-green-600 text-white px-6 py-3 rounded-lg">📤 Cargar Excel</button>
+                                <button onclick="printAllQRs()" class="bg-purple-600 text-white px-6 py-3 rounded-lg">🖨️ Imprimir QRs</button>
+                            </div>
+                            
+                            <div class="border rounded-lg overflow-hidden mb-6">
+                                <div class="p-4 bg-gray-50 flex justify-between items-center flex-wrap gap-3">
+                                    <span class="font-bold">Colaboradores (${monthEmps.length})</span>
+                                    <input type="text" id="searchEmp" placeholder="🔍 Buscar por ID o nombre..." 
+                                        oninput="filterEmps(this.value)" 
+                                        class="px-4 py-2 border-2 rounded-lg">
+                                </div>
+                                <table class="w-full">
+                                    <thead class="bg-gray-100">
+                                        <tr>
+                                            <th class="p-3 text-left">ID</th>
+                                            <th class="p-3 text-left">Nombre</th>
+                                            <th class="p-3 text-left">Dept</th>
+                                            <th class="p-3 text-left">QR</th>
+                                            <th class="p-3 text-left">Acciones</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="empTable">
+                                        ${monthEmps.length === 0 ? '<tr><td colspan="5" class="p-8 text-center text-gray-500">Sin colaboradores</td></tr>' :
+                                        monthEmps.map(e => `
+                                            <tr class="border-t emp-row" data-id="${e.employeeId.toLowerCase()}" data-name="${e.name.toLowerCase()}">
+                                                <td class="p-3">${e.employeeId}</td>
+                                                <td class="p-3">${e.name}</td>
+                                                <td class="p-3">${e.department}</td>
+                                                <td class="p-3"><code class="bg-gray-100 px-2 py-1 rounded text-sm">${e.qrCode}</code></td>
+                                                <td class="p-3">
+                                                    <button onclick="showAddTicket('${e.id}')" class="text-green-600 text-xl mr-2" title="Crear Ticket">➕</button>
+                                                    <button onclick="showQRCode('${e.qrCode}', '${e.name}')" class="text-blue-600 text-xl mr-2" title="Ver QR">📱</button>
+                                                    <button onclick="deleteEmp('${e.id}', '${e.name}')" class="text-red-600 text-xl" title="Eliminar">🗑️</button>
+                                                </td>
+                                            </tr>
+                                        `).join('')}
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <div class="border rounded-lg overflow-hidden">
+                                <div class="p-4 bg-gray-50 flex justify-between items-center flex-wrap gap-3">
+                                    <span class="font-bold">Tickets (${monthTickets.length})</span>
+                                    <input type="text" id="searchTicket" placeholder="🔍 Buscar por colaborador..." 
+                                        oninput="filterTickets(this.value)" 
+                                        class="px-4 py-2 border-2 rounded-lg">
+                                </div>
+                                <table class="w-full">
+                                    <thead class="bg-gray-100">
+                                        <tr>
+                                            <th class="p-3 text-left">Código</th>
+                                            <th class="p-3 text-left">Colaborador</th>
+                                            <th class="p-3 text-left">Estado</th>
+                                            <th class="p-3 text-left">Caducidad</th>
+                                            <th class="p-3 text-left">Usos</th>
+                                            <th class="p-3 text-left">Acciones</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="ticketTable">
+                                        ${monthTickets.length === 0 ? '<tr><td colspan="6" class="p-8 text-center text-gray-500">Sin tickets</td></tr>' :
+                                        monthTickets.map(t => {
+                                            const emp = employees.find(e => e.id === t.employeeId);
+                                            const expired = parseLocalDate(t.expirationDate) < new Date();
+                                            const exhausted = t.hasLimit && (t.usedDays || 0) >= t.maxTickets;
+                                            const statusColor = exhausted ? 'bg-orange-100 text-orange-800' : (!expired ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800');
+                                            const statusText = exhausted ? 'AGOTADO' : (!expired ? 'ACTIVO' : 'EXPIRADO');
+                                            return `
+                                                <tr class="border-t ticket-row" data-emp="${(emp?.name || '').toLowerCase()}">
+                                                    <td class="p-3 font-mono text-sm">${t.ticketCode}</td>
+                                                    <td class="p-3">${emp?.name || 'N/A'}</td>
+                                                    <td class="p-3"><span class="px-3 py-1 rounded-full text-xs font-semibold ${statusColor}">${statusText}</span></td>
+                                                    <td class="p-3">${formatLocalDate(t.expirationDate)}</td>
+                                                    <td class="p-3">
+                                                        <span class="bg-blue-100 px-3 py-1 rounded-full font-semibold">
+                                                            ${t.usedDays || 0}${t.hasLimit ? ` / ${t.maxTickets}` : ''}
+                                                        </span>
+                                                        ${t.hasLimit ? '<span class="ml-2 text-xs text-gray-500">🎯</span>' : ''}
+                                                    </td>
+                                                    <td class="p-3">
+                                                        <button onclick="deleteTicket('${t.id}', '${t.ticketCode}')" class="text-red-600 text-xl" title="Eliminar">🗑️</button>
+                                                    </td>
+                                                </tr>
+                                            `;
+                                        }).join('')}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50"></div>
+                </div>
+            `;
+        }
+
+        window.changeMonth = function(month) {
+            selectedMonth = month;
+            renderAdmin();
+        };
+
+        window.showAddEmp = function() {
+            document.getElementById('modal').innerHTML = `
+                <div class="bg-white rounded-lg p-6 max-w-md w-full">
+                    <h3 class="text-2xl font-bold mb-4">Agregar Colaborador</h3>
+                    <div class="bg-blue-50 p-3 rounded mb-4">
+                        <p class="text-sm font-semibold">📅 Se registrará en: ${getMonths().find(m => m.key === selectedMonth)?.name}</p>
+                    </div>
+                    <input type="text" id="name" placeholder="Nombre" class="w-full p-3 border rounded-lg mb-3">
+                    <input type="text" id="empId" placeholder="ID" class="w-full p-3 border rounded-lg mb-3">
+                    <input type="email" id="email" placeholder="Email" class="w-full p-3 border rounded-lg mb-3">
+                    <input type="text" id="dept" placeholder="Departamento" class="w-full p-3 border rounded-lg mb-3">
+                    <div class="flex gap-2">
+                        <button onclick="saveEmp()" class="flex-1 bg-blue-600 text-white py-3 rounded-lg">Agregar</button>
+                        <button onclick="closeModal()" class="flex-1 bg-gray-300 py-3 rounded-lg">Cancelar</button>
+                    </div>
+                </div>
+            `;
+            document.getElementById('modal').classList.remove('hidden');
+        };
+
+        window.saveEmp = async function() {
+            const name = document.getElementById('name').value.trim();
+            const employeeId = document.getElementById('empId').value.trim();
+            const email = document.getElementById('email').value.trim();
+            const department = document.getElementById('dept').value.trim();
+            
+            if (!name || !employeeId || !email || !department) { alert('Completa todos los campos'); return; }
+            
+            await addDoc(collection(db, 'employees'), {
+                name, employeeId, email, department,
+                qrCode: generateQR(),
+                registrationDate: `${selectedMonth}-01`
+            });
+            closeModal();
+        };
+
+        window.showUploadExcel = function() {
+            document.getElementById('modal').innerHTML = `
+                <div class="bg-white rounded-lg p-6 max-w-2xl w-full">
+                    <h3 class="text-2xl font-bold mb-4">📤 Cargar Colaboradores desde Excel</h3>
+                    
+                    <div class="bg-blue-50 border-2 border-blue-200 rounded-lg p-4 mb-4">
+                        <p class="font-semibold mb-2">📋 Formato del Excel:</p>
+                        <div class="text-sm space-y-1">
+                            <p>• <strong>Columna A:</strong> Nombre</p>
+                            <p>• <strong>Columna B:</strong> ID</p>
+                            <p>• <strong>Columna C:</strong> Email</p>
+                            <p>• <strong>Columna D:</strong> Departamento</p>
+                        </div>
+                        <p class="text-xs text-gray-600 mt-3">💡 La primera fila puede ser encabezados (se ignorará)</p>
+                    </div>
+
+                    <div class="bg-yellow-50 border-2 border-yellow-200 rounded-lg p-4 mb-4">
+                        <p class="text-sm">📅 Se registrarán en: <strong>${getMonths().find(m => m.key === selectedMonth)?.name}</strong></p>
+                    </div>
+
+                    <div class="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center mb-4 hover:border-blue-500 transition-colors">
+                        <div class="text-6xl mb-4">📂</div>
+                        <input type="file" id="excelFile" accept=".xlsx,.xls" class="hidden" onchange="handleFileSelect(event)">
+                        <label for="excelFile" class="cursor-pointer">
+                            <span class="bg-blue-600 text-white px-6 py-3 rounded-lg inline-block hover:bg-blue-700">
+                                Seleccionar archivo Excel
+                            </span>
+                        </label>
+                        <p class="text-sm text-gray-500 mt-3">Formatos: .xlsx, .xls</p>
+                    </div>
+
+                    <div id="previewContainer" class="hidden mb-4">
+                        <h4 class="font-bold mb-2">Vista previa:</h4>
+                        <div class="border rounded-lg overflow-auto max-h-60">
+                            <table class="w-full text-sm" id="previewTable"></table>
+                        </div>
+                        <p class="text-sm text-gray-600 mt-2">Total: <span id="totalRows" class="font-bold">0</span> colaboradores</p>
+                    </div>
+
+                    <div class="flex gap-2">
+                        <button id="uploadBtn" onclick="uploadEmployees()" class="flex-1 bg-green-600 text-white py-3 rounded-lg font-semibold" disabled>
+                            Cargar Colaboradores
+                        </button>
+                        <button onclick="closeModal()" class="flex-1 bg-gray-300 py-3 rounded-lg font-semibold">Cancelar</button>
+                    </div>
+                </div>
+            `;
+            document.getElementById('modal').classList.remove('hidden');
+        };
+
+        let excelData = [];
+
+        window.handleFileSelect = async function(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            try {
+                const data = await file.arrayBuffer();
+                const workbook = XLSX.read(data, { type: 'array' });
+                const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+                const jsonData = XLSX.utils.sheet_to_json(firstSheet, { header: 1 });
+
+                // Procesar datos (omitir primera fila si parece ser encabezado)
+                let startRow = 0;
+                if (jsonData[0] && typeof jsonData[0][0] === 'string' && 
+                    (jsonData[0][0].toLowerCase().includes('nombre') || 
+                     jsonData[0][0].toLowerCase().includes('name'))) {
+                    startRow = 1;
+                }
+
+                excelData = [];
+                for (let i = startRow; i < jsonData.length; i++) {
+                    const row = jsonData[i];
+                    if (row && row[0] && row[1]) { // Al menos nombre e ID
+                        excelData.push({
+                            name: String(row[0] || '').trim(),
+                            employeeId: String(row[1] || '').trim(),
+                            email: String(row[2] || '').trim(),
+                            department: String(row[3] || '').trim()
+                        });
+                    }
+                }
+
+                // Mostrar vista previa
+                if (excelData.length > 0) {
+                    showPreview(excelData);
+                    document.getElementById('uploadBtn').disabled = false;
+                } else {
+                    alert('No se encontraron datos válidos en el archivo');
+                }
+
+            } catch (error) {
+                console.error('Error al leer Excel:', error);
+                alert('Error al leer el archivo. Verifica que sea un Excel válido.');
+            }
+        };
+
+        function showPreview(data) {
+            const preview = data.slice(0, 10); // Mostrar primeros 10
+            let html = `
+                <thead class="bg-gray-100">
+                    <tr>
+                        <th class="p-2 text-left">Nombre</th>
+                        <th class="p-2 text-left">ID</th>
+                        <th class="p-2 text-left">Email</th>
+                        <th class="p-2 text-left">Departamento</th>
+                    </tr>
+                </thead>
+                <tbody>
+            `;
+            
+            preview.forEach(emp => {
+                html += `
+                    <tr class="border-t">
+                        <td class="p-2">${emp.name}</td>
+                        <td class="p-2">${emp.employeeId}</td>
+                        <td class="p-2">${emp.email}</td>
+                        <td class="p-2">${emp.department}</td>
+                    </tr>
+                `;
+            });
+            
+            html += '</tbody>';
+            document.getElementById('previewTable').innerHTML = html;
+            document.getElementById('totalRows').textContent = data.length;
+            document.getElementById('previewContainer').classList.remove('hidden');
+        }
+
+        window.uploadEmployees = async function() {
+            if (excelData.length === 0) {
+                alert('No hay datos para cargar');
+                return;
+            }
+
+            const btn = document.getElementById('uploadBtn');
+            btn.disabled = true;
+            btn.textContent = 'Cargando...';
+
+            let added = 0;
+            let errors = 0;
+
+            for (const emp of excelData) {
+                try {
+                    if (emp.name && emp.employeeId && emp.email && emp.department) {
+                        await addDoc(collection(db, 'employees'), {
+                            name: emp.name,
+                            employeeId: emp.employeeId,
+                            email: emp.email,
+                            department: emp.department,
+                            qrCode: generateQR(),
+                            registrationDate: `${selectedMonth}-01`
+                        });
+                        added++;
+                    } else {
+                        errors++;
+                    }
+                } catch (error) {
+                    console.error('Error al agregar empleado:', error);
+                    errors++;
+                }
+            }
+
+            alert(`✅ Carga completada!\n\n✓ Agregados: ${added}\n${errors > 0 ? `✗ Errores: ${errors}` : ''}`);
+            closeModal();
+            excelData = [];
+        };
+
+        window.showAddTicket = function(empId) {
+            const emp = employees.find(e => e.id === empId);
+            document.getElementById('modal').innerHTML = `
+                <div class="bg-white rounded-lg p-6 max-w-md w-full">
+                    <h3 class="text-2xl font-bold mb-4">Crear Ticket</h3>
+                    <div class="bg-blue-50 p-4 rounded mb-4">
+                        <p><strong>Colaborador:</strong> ${emp.name}</p>
+                        <p class="text-sm text-blue-700">📅 Mes: ${getMonths().find(m => m.key === selectedMonth)?.name}</p>
+                    </div>
+                    <input type="date" id="expDate" class="w-full p-3 border rounded-lg mb-3" min="${new Date().toISOString().split('T')[0]}">
+                    
+                    <div class="bg-gray-50 border rounded-lg p-4 mb-3">
+                        <label class="flex items-center cursor-pointer mb-3">
+                            <input type="checkbox" id="hasLimit" onchange="toggleLimitInput()" class="w-5 h-5 mr-3">
+                            <span class="font-semibold">🎯 Limitar cantidad de tickets</span>
+                        </label>
+                        <div id="limitContainer" class="hidden">
+                            <label class="block text-sm text-gray-600 mb-2">Cantidad máxima de tickets:</label>
+                            <input type="number" id="maxTickets" min="1" max="100" value="20" class="w-full p-3 border rounded-lg">
+                            <p class="text-xs text-gray-500 mt-2">💡 El colaborador solo podrá usar esta cantidad de tickets</p>
+                        </div>
+                    </div>
+                    
+                    <div class="flex gap-2">
+                        <button onclick="saveTicket('${empId}')" class="flex-1 bg-blue-600 text-white py-3 rounded-lg">Crear</button>
+                        <button onclick="closeModal()" class="flex-1 bg-gray-300 py-3 rounded-lg">Cancelar</button>
+                    </div>
+                </div>
+            `;
+            document.getElementById('modal').classList.remove('hidden');
+        };
+
+        window.toggleLimitInput = function() {
+            const checkbox = document.getElementById('hasLimit');
+            const container = document.getElementById('limitContainer');
+            if (checkbox.checked) {
+                container.classList.remove('hidden');
+            } else {
+                container.classList.add('hidden');
+            }
+        };
+
+        window.saveTicket = async function(empId) {
+            const expDate = document.getElementById('expDate').value;
+            if (!expDate) { alert('Selecciona fecha'); return; }
+            
+            const hasLimit = document.getElementById('hasLimit').checked;
+            const maxTickets = hasLimit ? parseInt(document.getElementById('maxTickets').value) : null;
+            
+            if (hasLimit && (!maxTickets || maxTickets < 1)) {
+                alert('Ingresa una cantidad válida de tickets');
+                return;
+            }
+            
+            const ticketData = {
+                employeeId: empId,
+                ticketCode: generateTicketCode(),
+                status: 'active',
+                requestDate: `${selectedMonth}-01`,
+                approvalDate: `${selectedMonth}-01`,
+                expirationDate: expDate,
+                usedDays: 0,
+                hasLimit: hasLimit,
+            };
+            
+            if (hasLimit) {
+                ticketData.maxTickets = maxTickets;
+            }
+            
+            await addDoc(collection(db, 'tickets'), ticketData);
+            closeModal();
+        };
+
+        window.closeModal = function() {
+            document.getElementById('modal').classList.add('hidden');
+        };
+
+        // FUNCIONES DE QR CODE
+        window.showQRCode = function(qrCode, empName) {
+            // Construir URL completa y absoluta
+            let baseUrl = window.location.href.split('?')[0];
+            // Si está en file:// usar una URL de ejemplo
+            if (baseUrl.startsWith('file://')) {
+                baseUrl = 'https://tudominio.com/tickets.html';
+            }
+            const loginUrl = `${baseUrl}?qr=${encodeURIComponent(qrCode)}`;
+            const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(loginUrl)}`;
+            
+            console.log('URL del QR:', loginUrl); // Para debugging
+            
+            document.getElementById('modal').innerHTML = `
+                <div class="bg-white rounded-lg p-6 max-w-md w-full">
+                    <h3 class="text-2xl font-bold mb-4 text-center">Código QR</h3>
+                    
+                    <div class="bg-blue-50 p-4 rounded-lg mb-4 text-center">
+                        <p class="font-semibold text-lg mb-2">${empName}</p>
+                        <p class="text-sm text-gray-600">Escanea para acceder automáticamente</p>
+                    </div>
+
+                    <div class="bg-white border-4 border-blue-500 rounded-lg p-6 mb-4 flex justify-center">
+                        <img src="${qrUrl}" alt="QR Code" class="w-64 h-64" />
+                    </div>
+
+                    <div class="bg-gray-50 border-2 border-gray-200 rounded-lg p-4 mb-4">
+                        <p class="text-xs text-gray-600 mb-2 text-center">Código de acceso:</p>
+                        <div class="flex items-center gap-2">
+                            <input type="text" id="qrCodeText" value="${qrCode}" readonly 
+                                class="flex-1 p-3 border-2 rounded-lg text-center font-mono bg-white text-lg font-bold">
+                            <button onclick="copyQRCode()" class="bg-blue-600 text-white px-4 py-3 rounded-lg hover:bg-blue-700 flex-shrink-0" title="Copiar">
+                                📋
+                            </button>
+                        </div>
+                        <p id="copyMessage" class="text-xs text-green-600 text-center mt-2 hidden">✓ Copiado al portapapeles</p>
+                    </div>
+
+                    <div class="bg-purple-50 border-2 border-purple-200 rounded-lg p-3 mb-3">
+                        <p class="text-xs font-semibold mb-1">🔗 URL del QR:</p>
+                        <p class="text-xs font-mono break-all text-gray-700">${loginUrl}</p>
+                    </div>
+
+                    <div class="flex gap-2">
+                        <button onclick="downloadQR('${qrUrl}', '${qrCode}')" class="flex-1 bg-green-600 text-white py-3 rounded-lg font-semibold">
+                            📥 Descargar QR
+                        </button>
+                        <button onclick="closeModal()" class="flex-1 bg-gray-300 py-3 rounded-lg font-semibold">
+                            Cerrar
+                        </button>
+                    </div>
+
+                    <div class="mt-4 bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+                        <p class="text-xs text-gray-700">
+                            <strong>💡 Instrucciones:</strong><br>
+                            1. Escanea el QR con tu cámara<br>
+                            2. Se abrirá el login automáticamente<br>
+                            3. El código estará pre-llenado<br>
+                            <br>
+                            <strong>⚠️ Si no funciona:</strong><br>
+                            Copia el código manualmente: <strong>${qrCode}</strong>
+                        </p>
+                    </div>
+                </div>
+            `;
+            document.getElementById('modal').classList.remove('hidden');
+        };
+
+        window.copyQRCode = async function() {
+            const codeText = document.getElementById('qrCodeText').value;
+            const message = document.getElementById('copyMessage');
+            
+            try {
+                // Intentar método moderno (funciona en la mayoría de navegadores)
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    await navigator.clipboard.writeText(codeText);
+                } else {
+                    // Fallback para navegadores antiguos o iOS Safari
+                    const textArea = document.createElement('textarea');
+                    textArea.value = codeText;
+                    textArea.style.position = 'fixed';
+                    textArea.style.left = '-999999px';
+                    textArea.style.top = '-999999px';
+                    document.body.appendChild(textArea);
+                    textArea.focus();
+                    textArea.select();
+                    
+                    try {
+                        document.execCommand('copy');
+                        textArea.remove();
+                    } catch (err) {
+                        console.error('Error al copiar:', err);
+                        textArea.remove();
+                        alert('No se pudo copiar. Por favor, copia manualmente el código.');
+                        return;
+                    }
+                }
+                
+                // Mostrar mensaje de éxito
+                message.classList.remove('hidden');
+                setTimeout(() => {
+                    message.classList.add('hidden');
+                }, 2000);
+            } catch (err) {
+                console.error('Error al copiar:', err);
+                alert('No se pudo copiar automáticamente. Por favor, selecciona y copia el código manualmente.');
+            }
+        };
+
+        window.downloadQR = async function(qrUrl, qrCode) {
+            try {
+                const response = await fetch(qrUrl);
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `QR_${qrCode}.png`;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                a.remove();
+            } catch (error) {
+                console.error('Error al descargar:', error);
+                alert('No se pudo descargar. Puedes hacer captura de pantalla del QR.');
+            }
+        };
+
+        window.printAllQRs = function() {
+            const monthEmps = employees.filter(e => e.registrationDate && e.registrationDate.slice(0, 7) === selectedMonth);
+            
+            if (monthEmps.length === 0) {
+                alert('No hay colaboradores en este mes para imprimir');
+                return;
+            }
+
+            // Construir URL base
+            let baseUrl = window.location.href.split('?')[0];
+            if (baseUrl.startsWith('file://')) {
+                baseUrl = 'https://tudominio.com/tickets.html';
+            }
+
+            let printContent = `
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <meta charset="UTF-8">
+                    <title>Códigos QR - ${getMonths().find(m => m.key === selectedMonth)?.name}</title>
+                    <style>
+                        @media print {
+                            @page { margin: 1cm; }
+                            body { margin: 0; }
+                        }
+                        body {
+                            font-family: Arial, sans-serif;
+                            padding: 20px;
+                        }
+                        .header {
+                            text-align: center;
+                            margin-bottom: 30px;
+                            border-bottom: 3px solid #2563eb;
+                            padding-bottom: 15px;
+                        }
+                        .grid {
+                            display: grid;
+                            grid-template-columns: repeat(2, 1fr);
+                            gap: 30px;
+                        }
+                        .qr-card {
+                            border: 2px solid #e5e7eb;
+                            border-radius: 12px;
+                            padding: 20px;
+                            text-align: center;
+                            page-break-inside: avoid;
+                            background: white;
+                        }
+                        .qr-card h3 {
+                            margin: 0 0 10px 0;
+                            color: #1f2937;
+                            font-size: 18px;
+                        }
+                        .qr-card .dept {
+                            color: #6b7280;
+                            font-size: 14px;
+                            margin-bottom: 15px;
+                        }
+                        .qr-card img {
+                            width: 200px;
+                            height: 200px;
+                            margin: 15px auto;
+                            display: block;
+                        }
+                        .qr-code-text {
+                            background: #f3f4f6;
+                            padding: 10px;
+                            border-radius: 6px;
+                            font-family: monospace;
+                            font-size: 14px;
+                            font-weight: bold;
+                            margin-top: 10px;
+                            color: #1f2937;
+                        }
+                    </style>
+                </head>
+                <body>
+                    <div class="header">
+                        <h1>Códigos QR de Acceso</h1>
+                        <p>${getMonths().find(m => m.key === selectedMonth)?.name}</p>
+                        <p style="font-size: 14px; color: #6b7280;">Total: ${monthEmps.length} colaboradores</p>
+                    </div>
+                    <div class="grid">
+            `;
+
+            monthEmps.forEach(emp => {
+                const loginUrl = `${baseUrl}?qr=${encodeURIComponent(emp.qrCode)}`;
+                const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(loginUrl)}`;
+                printContent += `
+                    <div class="qr-card">
+                        <h3>${emp.name}</h3>
+                        <div class="dept">${emp.department}</div>
+                        <img src="${qrUrl}" alt="QR Code">
+                        <div class="qr-code-text">${emp.qrCode}</div>
+                    </div>
+                `;
+            });
+
+            printContent += `
+                    </div>
+                </body>
+                </html>
+            `;
+
+            const printWindow = window.open('', '_blank');
+            printWindow.document.write(printContent);
+            printWindow.document.close();
+            
+            // Esperar a que las imágenes carguen antes de imprimir
+            printWindow.onload = function() {
+                setTimeout(() => {
+                    printWindow.print();
+                }, 1000);
+            };
+        };
+
+        // FUNCIONES DE ELIMINACIÓN
+        window.deleteEmp = async function(empId, empName) {
+            if (!confirm(`¿Eliminar a ${empName}?`)) return;
+            
+            const empTickets = tickets.filter(t => t.employeeId === empId);
+            for (const t of empTickets) {
+                await deleteDoc(doc(db, 'tickets', t.id));
+            }
+            
+            const empUsage = ticketUsage.filter(u => u.employeeId === empId);
+            for (const u of empUsage) {
+                await deleteDoc(doc(db, 'ticketUsage', u.id));
+            }
+            
+            await deleteDoc(doc(db, 'employees', empId));
+            alert('✅ Colaborador eliminado');
+        };
+
+        window.deleteTicket = async function(ticketId, ticketCode) {
+            if (!confirm(`¿Eliminar ticket ${ticketCode}?`)) return;
+            
+            const ticketUses = ticketUsage.filter(u => u.ticketId === ticketId);
+            for (const u of ticketUses) {
+                await deleteDoc(doc(db, 'ticketUsage', u.id));
+            }
+            
+            await deleteDoc(doc(db, 'tickets', ticketId));
+            alert('✅ Ticket eliminado');
+        };
+
+        // FUNCIONES DE FILTRADO
+        window.filterEmps = function(search) {
+            const rows = document.querySelectorAll('.emp-row');
+            const searchLower = search.toLowerCase().trim();
+            
+            rows.forEach(row => {
+                const id = row.dataset.id;
+                const name = row.dataset.name;
+                const matches = id.includes(searchLower) || name.includes(searchLower);
+                row.style.display = matches ? '' : 'none';
+            });
+        };
+
+        window.filterTickets = function(search) {
+            const rows = document.querySelectorAll('.ticket-row');
+            const searchLower = search.toLowerCase().trim();
+            
+            rows.forEach(row => {
+                const emp = row.dataset.emp;
+                const matches = emp.includes(searchLower);
+                row.style.display = matches ? '' : 'none';
+            });
+        };
+
+        window.cleanDB = async function() {
+            if (!confirm('⚠️ Eliminar TODO?')) return;
+            if (!confirm('¿REALMENTE seguro?')) return;
+            
+            for (const e of employees) await deleteDoc(doc(db, 'employees', e.id));
+            for (const t of tickets) await deleteDoc(doc(db, 'tickets', t.id));
+            for (const u of ticketUsage) await deleteDoc(doc(db, 'ticketUsage', u.id));
+            
+            employees = [];
+            tickets = [];
+            ticketUsage = [];
+            alert('✅ Base de datos limpiada');
+            renderAdmin();
+        };
+
+        // Iniciar
+        window.addEventListener('DOMContentLoaded', async () => {
+            // Verificar si hay un código QR en la URL antes de cargar
+            const urlParams = new URLSearchParams(window.location.search);
+            const qrFromUrl = urlParams.get('qr');
+            
+            console.log('URL completa:', window.location.href);
+            console.log('Parámetro QR:', qrFromUrl);
+            
+            // Mostrar pantalla de carga si viene de QR
+            if (qrFromUrl) {
+                document.getElementById('app').innerHTML = `
+                    <div class="min-h-screen bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center p-4">
+                        <div class="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full text-center">
+                            <div class="text-6xl mb-4">⏳</div>
+                            <h2 class="text-2xl font-bold mb-2">Cargando...</h2>
+                            <p class="text-gray-600">Accediendo con código:</p>
+                            <p class="font-mono font-bold text-blue-600 mt-2">${qrFromUrl}</p>
+                            <div class="mt-6">
+                                <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            // Cargar datos desde Firebase
+            await Promise.all([loadEmployees(), loadTickets(), loadUsage()]);
+            
+            console.log('Empleados cargados:', employees.length);
+            
+            if (qrFromUrl) {
+                // Limpiar la URL
+                window.history.replaceState({}, document.title, window.location.pathname);
+                
+                // Buscar el empleado
+                const emp = employees.find(e => e.qrCode === qrFromUrl);
+                
+                console.log('Empleado encontrado:', emp);
+                
+                if (emp) {
+                    // Login automático exitoso
+                    userType = 'employee';
+                    currentUser = emp;
+                    renderEmployee();
+                } else if (qrFromUrl === ADMIN_CODE) {
+                    // Login como admin
+                    userType = 'admin';
+                    currentUser = { name: 'Administrador' };
+                    renderAdmin();
+                } else {
+                    // Código no válido - mostrar login con el código
+                    renderLogin();
+                    setTimeout(() => {
+                        showQRInput(qrFromUrl);
+                        alert(`⚠️ Código QR no encontrado: ${qrFromUrl}\n\nVerifica que esté registrado en el sistema o que hayas escaneado el código correcto.`);
+                    }, 100);
+                }
+            } else {
+                // Login normal sin QR
+                renderLogin();
+            }
+        });
+    </script>
+</body>
+</html>
