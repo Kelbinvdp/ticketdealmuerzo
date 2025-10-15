@@ -113,9 +113,6 @@
                     <button onclick="showQRInput()" class="w-full bg-blue-600 text-white py-4 rounded-lg hover:bg-blue-700 font-semibold">
                         👥 Acceso Colaboradores
                     </button>
-                    <button onclick="showQRInput('${ADMIN_CODE}')" class="w-full bg-purple-600 text-white py-4 rounded-lg hover:bg-purple-700 font-semibold">
-                        🔐 Acceso Administrador
-                    </button>
                 </div>
             `;
         }
@@ -125,13 +122,8 @@
                 <div class="space-y-4">
                     <div class="bg-blue-50 p-6 rounded-lg border-2 border-blue-200">
                         <div class="text-6xl text-center mb-4">📱</div>
-                        <input type="text" id="qrCode" value="${code}" placeholder="QR-EMP001-2025" 
+                        <input type="text" id="qrCode" value="${code}" placeholder="Ingresa tu código de acceso" 
                             class="w-full p-3 border-2 rounded-lg text-center font-mono" autofocus>
-                        <div class="mt-4 bg-yellow-50 p-3 rounded text-xs">
-                            <p class="font-bold">Códigos:</p>
-                            <p>Colaboradores: QR-EMP001-2025</p>
-                            <p class="font-bold">Admin: ${ADMIN_CODE}</p>
-                        </div>
                     </div>
                     <div class="flex gap-2">
                         <button onclick="doLogin()" class="flex-1 bg-green-600 text-white py-3 rounded-lg font-semibold">Acceder</button>
@@ -731,12 +723,8 @@
 
         // FUNCIONES DE QR CODE
         window.showQRCode = function(qrCode, empName) {
-            // Construir URL completa y absoluta
-            let baseUrl = window.location.href.split('?')[0];
-            // Si está en file:// usar una URL de ejemplo
-            if (baseUrl.startsWith('file://')) {
-                baseUrl = 'https://tudominio.com/tickets.html';
-            }
+            // URL fija de GitHub Pages
+            const baseUrl = 'https://kelbinvdp.github.io/ticketdealmuerzo';
             const loginUrl = `${baseUrl}?qr=${encodeURIComponent(qrCode)}`;
             const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(loginUrl)}`;
             
@@ -767,11 +755,6 @@
                         <p id="copyMessage" class="text-xs text-green-600 text-center mt-2 hidden">✓ Copiado al portapapeles</p>
                     </div>
 
-                    <div class="bg-purple-50 border-2 border-purple-200 rounded-lg p-3 mb-3">
-                        <p class="text-xs font-semibold mb-1">🔗 URL del QR:</p>
-                        <p class="text-xs font-mono break-all text-gray-700">${loginUrl}</p>
-                    </div>
-
                     <div class="flex gap-2">
                         <button onclick="downloadQR('${qrUrl}', '${qrCode}')" class="flex-1 bg-green-600 text-white py-3 rounded-lg font-semibold">
                             📥 Descargar QR
@@ -786,10 +769,7 @@
                             <strong>💡 Instrucciones:</strong><br>
                             1. Escanea el QR con tu cámara<br>
                             2. Se abrirá el login automáticamente<br>
-                            3. El código estará pre-llenado<br>
-                            <br>
-                            <strong>⚠️ Si no funciona:</strong><br>
-                            Copia el código manualmente: <strong>${qrCode}</strong>
+                            3. Acceso inmediato a tu cuenta
                         </p>
                     </div>
                 </div>
@@ -864,11 +844,8 @@
                 return;
             }
 
-            // Construir URL base
-            let baseUrl = window.location.href.split('?')[0];
-            if (baseUrl.startsWith('file://')) {
-                baseUrl = 'https://tudominio.com/tickets.html';
-            }
+            // URL fija de GitHub Pages
+            const baseUrl = 'https://kelbinvdp.github.io/ticketdealmuerzo';
 
             let printContent = `
                 <!DOCTYPE html>
