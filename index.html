@@ -34,7 +34,7 @@
         let tickets = [];
         let ticketUsage = [];
         let selectedMonth = '2025-01';
-        const ADMIN_CODE = 'ADMIN2025';
+        const ADMIN_CODE = '';
 
         // Cargar datos desde Firebase
         async function loadEmployees() {
@@ -112,6 +112,9 @@
                 <div class="space-y-3">
                     <button onclick="showQRInput()" class="w-full bg-blue-600 text-white py-4 rounded-lg hover:bg-blue-700 font-semibold">
                         👥 Acceso Colaboradores
+                    </button>
+                    <button onclick="showQRInput('${ADMIN_CODE}')" class="w-full bg-purple-600 text-white py-4 rounded-lg hover:bg-purple-700 font-semibold">
+                        🔐 Acceso Administrador
                     </button>
                 </div>
             `;
