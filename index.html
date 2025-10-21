@@ -119,17 +119,19 @@
         function showLoginButtons() {
             document.getElementById('loginBox').innerHTML = `
                 <div class="space-y-3">
-                    <button onclick="showQRInput()" class="w-full bg-blue-600 text-white py-4 rounded-lg hover:bg-blue-700 font-semibold">
+                    <button onclick="showQRInput('', true)" class="w-full bg-blue-600 text-white py-4 rounded-lg hover:bg-blue-700 font-semibold">
                         👥 Acceso Colaboradores
                     </button>
-                    <button onclick="showQRInput('******')" class="w-full bg-purple-600 text-white py-4 rounded-lg hover:bg-purple-700 font-semibold">
+                    <button onclick="showQRInput('', false)" class="w-full bg-purple-600 text-white py-4 rounded-lg hover:bg-purple-700 font-semibold">
                         🔐 Acceso Administrador
                     </button>
                 </div>
             `;
         }
 
-        window.showQRInput = function(code = '') {
+        window.showQRInput = function(code = '', showHistory = true) {
+            const history = showHistory ? getCodeHistory() : [];
+            
             document.getElementById('loginBox').innerHTML = `
                 <div class="space-y-4">
                     <div class="bg-blue-50 p-6 rounded-lg border-2 border-blue-200">
@@ -137,6 +139,37 @@
                         <input type="text" id="qrCode" value="${code}" placeholder="Ingresa tu código de acceso" 
                             class="w-full p-3 border-2 rounded-lg text-center font-mono" autofocus>
                     </div>
+                    
+                    ${showHistory && history.length > 0 ? `
+                        <div class="bg-gradient-to-r from-purple-50 to-pink-50 border-2 border-purple-200 rounded-lg p-4">
+                            <div class="flex justify-between items-center mb-3">
+                                <h3 class="font-bold text-sm flex items-center gap-2">
+                                    🕐 Códigos Recientes (Este dispositivo)
+                                </h3>
+                                <button onclick="clearCodeHistory()" class="text-xs text-red-600 hover:text-red-800 font-semibold">
+                                    🗑️ Limpiar
+                                </button>
+                            </div>
+                            <div class="space-y-2">
+                                ${history.map(item => `
+                                    <button onclick="selectHistoryCode('${item.code}')" 
+                                        class="w-full bg-white hover:bg-purple-100 border-2 border-purple-200 rounded-lg p-3 text-left transition-all">
+                                        <div class="flex justify-between items-center">
+                                            <div class="flex-1">
+                                                <p class="font-semibold text-sm">${item.name}</p>
+                                                <p class="text-xs text-gray-600 font-mono">${item.code}</p>
+                                            </div>
+                                            <div class="text-2xl">→</div>
+                                        </div>
+                                    </button>
+                                `).join('')}
+                            </div>
+                            <p class="text-xs text-gray-600 mt-3 text-center">
+                                ⚠️ Este historial es privado de este dispositivo
+                            </p>
+                        </div>
+                    ` : ''}
+                    
                     <div class="flex gap-2">
                         <button onclick="doLogin()" class="flex-1 bg-green-600 text-white py-3 rounded-lg font-semibold">Acceder</button>
                         <button onclick="showLoginButtons()" class="flex-1 bg-gray-300 py-3 rounded-lg font-semibold">Cancelar</button>
@@ -145,18 +178,29 @@
             `;
         };
 
+        window.selectHistoryCode = function(code) {
+            document.getElementById('qrCode').value = code;
+            document.getElementById('qrCode').focus();
+        };
+
         window.showLoginButtons = showLoginButtons;
 
         window.doLogin = async function() {
             const code = document.getElementById('qrCode').value.trim();
+            
             if (code === ADMIN_CODE) {
                 userType = 'admin';
                 currentUser = { name: 'Administrador' };
                 await Promise.all([loadEmployees(), loadTickets(), loadUsage()]);
                 
                 // Guardar sesión
-                localStorage.setItem('userType', 'admin');
-                localStorage.setItem('userCode', code);
+                try {
+                    localStorage.setItem('ticketSystem_userType', 'admin');
+                    localStorage.setItem('ticketSystem_userCode', code);
+                    console.log('Sesión admin guardada');
+                } catch (error) {
+                    console.error('Error al guardar sesión:', error);
+                }
                 
                 renderAdmin();
             } else {
@@ -166,10 +210,19 @@
                     currentUser = emp;
                     await Promise.all([loadTickets(), loadUsage()]);
                     
+                    // Guardar en historial de códigos
+                    saveCodeToHistory(code, emp.name);
+                    
                     // Guardar sesión
-                    localStorage.setItem('userType', 'employee');
-                    localStorage.setItem('userId', emp.id);
-                    localStorage.setItem('userCode', code);
+                    try {
+                        localStorage.setItem('ticketSystem_userType', 'employee');
+                        localStorage.setItem('ticketSystem_userId', emp.id);
+                        localStorage.setItem('ticketSystem_userCode', code);
+                        localStorage.setItem('ticketSystem_userName', emp.name);
+                        console.log('Sesión empleado guardada:', emp.name);
+                    } catch (error) {
+                        console.error('Error al guardar sesión:', error);
+                    }
                     
                     renderEmployee();
                 } else {
@@ -178,16 +231,67 @@
             }
         };
 
+        // Función para guardar código en historial
+        function saveCodeToHistory(code, name) {
+            try {
+                let history = JSON.parse(localStorage.getItem('ticketSystem_codeHistory') || '[]');
+                
+                // Remover si ya existe (para moverlo al principio)
+                history = history.filter(item => item.code !== code);
+                
+                // Agregar al principio
+                history.unshift({ code, name, date: new Date().toISOString() });
+                
+                // Mantener solo los últimos 5
+                history = history.slice(0, 5);
+                
+                localStorage.setItem('ticketSystem_codeHistory', JSON.stringify(history));
+            } catch (error) {
+                console.error('Error al guardar historial:', error);
+            }
+        }
+
+        // Función para obtener historial
+        function getCodeHistory() {
+            try {
+                return JSON.parse(localStorage.getItem('ticketSystem_codeHistory') || '[]');
+            } catch (error) {
+                console.error('Error al leer historial:', error);
+                return [];
+            }
+        }
+
+        // Función para limpiar historial
+        window.clearCodeHistory = function() {
+            if (confirm('¿Eliminar todo el historial de códigos?')) {
+                try {
+                    localStorage.removeItem('ticketSystem_codeHistory');
+                    showQRInput();
+                } catch (error) {
+                    console.error('Error al limpiar historial:', error);
+                }
+            }
+        };
+
         window.logout = function() {
-            currentUser = null;
-            userType = null;
-            
-            // Limpiar sesión guardada
-            localStorage.removeItem('userType');
-            localStorage.removeItem('userId');
-            localStorage.removeItem('userCode');
-            
-            renderLogin();
+            if (confirm('¿Cerrar sesión?')) {
+                currentUser = null;
+                userType = null;
+                
+                // Limpiar sesión guardada (pero NO el historial)
+                try {
+                    localStorage.removeItem('ticketSystem_userType');
+                    localStorage.removeItem('ticketSystem_userId');
+                    localStorage.removeItem('ticketSystem_userCode');
+                    localStorage.removeItem('ticketSystem_userName');
+                    // NO limpiar: ticketSystem_codeHistory
+                    console.log('Sesión cerrada (historial preservado)');
+                } catch (error) {
+                    console.error('Error al limpiar sesión:', error);
+                }
+                
+                renderLogin();
+            }
         };
 
         // PANEL EMPLEADO
@@ -1179,13 +1283,21 @@
             const urlParams = new URLSearchParams(window.location.search);
             const qrFromUrl = urlParams.get('qr');
             
-            console.log('URL completa:', window.location.href);
-            console.log('Parámetro QR:', qrFromUrl);
-            
             // Verificar si hay sesión guardada
-            const savedUserType = localStorage.getItem('userType');
-            const savedUserId = localStorage.getItem('userId');
-            const savedUserCode = localStorage.getItem('userCode');
+            let savedUserType = null;
+            let savedUserId = null;
+            let savedUserCode = null;
+            let savedUserName = null;
+            
+            try {
+                savedUserType = localStorage.getItem('ticketSystem_userType');
+                savedUserId = localStorage.getItem('ticketSystem_userId');
+                savedUserCode = localStorage.getItem('ticketSystem_userCode');
+                savedUserName = localStorage.getItem('ticketSystem_userName');
+                console.log('Sesión guardada detectada:', { savedUserType, savedUserName });
+            } catch (error) {
+                console.error('Error al leer sesión:', error);
+            }
             
             // Mostrar pantalla de carga
             if (qrFromUrl || savedUserType) {
@@ -1194,7 +1306,7 @@
                         <div class="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full text-center">
                             <div class="text-6xl mb-4">⏳</div>
                             <h2 class="text-2xl font-bold mb-2">Cargando...</h2>
-                            <p class="text-gray-600">${qrFromUrl ? `Accediendo con código: ${qrFromUrl}` : 'Restaurando sesión...'}</p>
+                            <p class="text-gray-600">${qrFromUrl ? `Accediendo con QR...` : savedUserName ? `Bienvenido ${savedUserName}` : 'Restaurando sesión...'}</p>
                             <div class="mt-6">
                                 <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
                             </div>
@@ -1210,13 +1322,12 @@
             
             // Prioridad 1: QR desde URL
             if (qrFromUrl) {
+                console.log('Login desde URL con QR:', qrFromUrl);
                 // Limpiar la URL
                 window.history.replaceState({}, document.title, window.location.pathname);
                 
                 // Buscar el empleado
                 const emp = employees.find(e => e.qrCode === qrFromUrl);
-                
-                console.log('Empleado encontrado:', emp);
                 
                 if (emp) {
                     // Login automático exitoso
@@ -1224,9 +1335,15 @@
                     currentUser = emp;
                     
                     // Guardar sesión
-                    localStorage.setItem('userType', 'employee');
-                    localStorage.setItem('userId', emp.id);
-                    localStorage.setItem('userCode', qrFromUrl);
+                    try {
+                        localStorage.setItem('ticketSystem_userType', 'employee');
+                        localStorage.setItem('ticketSystem_userId', emp.id);
+                        localStorage.setItem('ticketSystem_userCode', qrFromUrl);
+                        localStorage.setItem('ticketSystem_userName', emp.name);
+                        console.log('Sesión guardada desde QR URL');
+                    } catch (error) {
+                        console.error('Error al guardar sesión:', error);
+                    }
                     
                     renderEmployee();
                 } else if (qrFromUrl === ADMIN_CODE) {
@@ -1235,8 +1352,13 @@
                     currentUser = { name: 'Administrador' };
                     
                     // Guardar sesión
-                    localStorage.setItem('userType', 'admin');
-                    localStorage.setItem('userCode', qrFromUrl);
+                    try {
+                        localStorage.setItem('ticketSystem_userType', 'admin');
+                        localStorage.setItem('ticketSystem_userCode', qrFromUrl);
+                        console.log('Sesión admin guardada desde QR URL');
+                    } catch (error) {
+                        console.error('Error al guardar sesión:', error);
+                    }
                     
                     renderAdmin();
                 } else {
@@ -1244,25 +1366,36 @@
                     renderLogin();
                     setTimeout(() => {
                         showQRInput(qrFromUrl);
-                        alert(`⚠️ Código QR no encontrado: ${qrFromUrl}\n\nVerifica que esté registrado en el sistema o que hayas escaneado el código correcto.`);
+                        alert(`⚠️ Código QR no encontrado: ${qrFromUrl}\n\nVerifica que esté registrado en el sistema.`);
                     }, 100);
                 }
             } 
             // Prioridad 2: Sesión guardada
             else if (savedUserType) {
+                console.log('Restaurando sesión guardada:', savedUserType);
                 if (savedUserType === 'admin') {
                     userType = 'admin';
                     currentUser = { name: 'Administrador' };
                     renderAdmin();
+                    console.log('Sesión admin restaurada');
                 } else if (savedUserType === 'employee' && savedUserId) {
                     const emp = employees.find(e => e.id === savedUserId);
                     if (emp) {
                         userType = 'employee';
                         currentUser = emp;
                         renderEmployee();
+                        console.log('Sesión empleado restaurada:', emp.name);
                     } else {
                         // Usuario no encontrado, limpiar sesión
-                        localStorage.clear();
+                        console.log('Usuario no encontrado, limpiando sesión');
+                        try {
+                            localStorage.removeItem('ticketSystem_userType');
+                            localStorage.removeItem('ticketSystem_userId');
+                            localStorage.removeItem('ticketSystem_userCode');
+                            localStorage.removeItem('ticketSystem_userName');
+                        } catch (error) {
+                            console.error('Error al limpiar sesión:', error);
+                        }
                         renderLogin();
                         alert('⚠️ Tu sesión expiró. Por favor, inicia sesión nuevamente.');
                     }
@@ -1272,6 +1405,7 @@
             } 
             // Sin QR ni sesión: mostrar login normal
             else {
+                console.log('Sin sesión, mostrando login');
                 renderLogin();
             }
         });
