@@ -34,6 +34,8 @@
         let tickets = [];
         let ticketUsage = [];
         let selectedMonth = '2025-01';
+        let dailyUsageExpanded = true;
+        let currentSelectedDate = new Date().toISOString().split('T')[0];
         const ADMIN_CODE = 'ADMIN2025';
 
         // Cargar datos desde Firebase
@@ -57,7 +59,14 @@
         // Escuchar cambios en tiempo real
         onSnapshot(collection(db, 'employees'), () => { loadEmployees().then(() => { if (userType === 'admin') renderAdmin(); }); });
         onSnapshot(collection(db, 'tickets'), () => { loadTickets().then(() => { if (userType === 'admin') renderAdmin(); if (userType === 'employee') renderEmployee(); }); });
-        onSnapshot(collection(db, 'ticketUsage'), () => { loadUsage().then(() => { if (userType === 'employee') renderEmployee(); }); });
+        onSnapshot(collection(db, 'ticketUsage'), () => { 
+            loadUsage().then(() => { 
+                if (userType === 'employee') renderEmployee(); 
+                if (userType === 'admin' && document.getElementById('dailyUsageTable')) {
+                    updateDailyUsage(currentSelectedDate);
+                }
+            }); 
+        });
 
         // Utilidades
         function generateQR() {
@@ -113,7 +122,7 @@
                     <button onclick="showQRInput()" class="w-full bg-blue-600 text-white py-4 rounded-lg hover:bg-blue-700 font-semibold">
                         👥 Acceso Colaboradores
                     </button>
-                    <button onclick="showQRInput('${ADMIN_CODE}')" class="w-full bg-purple-600 text-white py-4 rounded-lg hover:bg-purple-700 font-semibold">
+                    <button onclick="showQRInput('******')" class="w-full bg-purple-600 text-white py-4 rounded-lg hover:bg-purple-700 font-semibold">
                         🔐 Acceso Administrador
                     </button>
                 </div>
@@ -125,7 +134,7 @@
                 <div class="space-y-4">
                     <div class="bg-blue-50 p-6 rounded-lg border-2 border-blue-200">
                         <div class="text-6xl text-center mb-4">📱</div>
-                        <input type="text" id="qrCode" value="" placeholder="Ingresa tu código de acceso" 
+                        <input type="text" id="qrCode" value="${code}" placeholder="Ingresa tu código de acceso" 
                             class="w-full p-3 border-2 rounded-lg text-center font-mono" autofocus>
                     </div>
                     <div class="flex gap-2">
@@ -144,6 +153,11 @@
                 userType = 'admin';
                 currentUser = { name: 'Administrador' };
                 await Promise.all([loadEmployees(), loadTickets(), loadUsage()]);
+                
+                // Guardar sesión
+                localStorage.setItem('userType', 'admin');
+                localStorage.setItem('userCode', code);
+                
                 renderAdmin();
             } else {
                 const emp = employees.find(e => e.qrCode === code);
@@ -151,6 +165,12 @@
                     userType = 'employee';
                     currentUser = emp;
                     await Promise.all([loadTickets(), loadUsage()]);
+                    
+                    // Guardar sesión
+                    localStorage.setItem('userType', 'employee');
+                    localStorage.setItem('userId', emp.id);
+                    localStorage.setItem('userCode', code);
+                    
                     renderEmployee();
                 } else {
                     alert('Código QR no válido');
@@ -161,6 +181,12 @@
         window.logout = function() {
             currentUser = null;
             userType = null;
+            
+            // Limpiar sesión guardada
+            localStorage.removeItem('userType');
+            localStorage.removeItem('userId');
+            localStorage.removeItem('userCode');
+            
             renderLogin();
         };
 
@@ -245,7 +271,105 @@
                     <div id="modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50"></div>
                 </div>
             `;
+            
+            // Inicializar el uso diario con la fecha de hoy
+            setTimeout(() => {
+                updateDailyUsage(new Date().toISOString().split('T')[0]);
+            }, 100);
         }
+
+        window.toggleDailyUsage = function() {
+            dailyUsageExpanded = !dailyUsageExpanded;
+            const container = document.getElementById('dailyUsageContainer');
+            const icon = document.getElementById('toggleIcon');
+            const text = document.getElementById('toggleText');
+            
+            if (dailyUsageExpanded) {
+                container.style.display = 'block';
+                icon.textContent = '▼';
+                text.textContent = 'Minimizar';
+            } else {
+                container.style.display = 'none';
+                icon.textContent = '▶';
+                text.textContent = 'Expandir';
+            }
+        };
+
+        window.updateDailyUsage = function(selectedDate) {
+            currentSelectedDate = selectedDate;
+            const dayUsage = ticketUsage.filter(u => u.date === selectedDate);
+            const count = dayUsage.length;
+            
+            const countElement = document.getElementById('dailyCount');
+            if (countElement) {
+                countElement.textContent = count;
+            }
+            
+            const tableElement = document.getElementById('dailyUsageTable');
+            if (!tableElement) return;
+            
+            if (count === 0) {
+                tableElement.innerHTML = `
+                    <div class="bg-white border-2 border-dashed border-gray-300 rounded-lg p-8 text-center">
+                        <p class="text-gray-500">📭 No hay tickets usados en esta fecha</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            // Ordenar por hora
+            dayUsage.sort((a, b) => {
+                const timeA = a.time.split(':').map(Number);
+                const timeB = b.time.split(':').map(Number);
+                return (timeA[0] * 60 + timeA[1]) - (timeB[0] * 60 + timeB[1]);
+            });
+            
+            let tableHtml = `
+                <div class="bg-white border-2 border-cyan-200 rounded-lg overflow-hidden">
+                    <div class="bg-cyan-100 p-3 font-bold border-b-2 border-cyan-200 flex justify-between items-center">
+                        <span>Lista de usos del día - ${formatLocalDate(selectedDate, {weekday:'long', day:'numeric', month:'long', year:'numeric'})}</span>
+                        <span class="bg-cyan-600 text-white px-3 py-1 rounded-full text-sm">${count} registros</span>
+                    </div>
+                    <table class="w-full">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="p-3 text-left">#</th>
+                                <th class="p-3 text-left">Hora</th>
+                                <th class="p-3 text-left">Colaborador</th>
+                                <th class="p-3 text-left">Departamento</th>
+                                <th class="p-3 text-left">ID</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+            `;
+            
+            dayUsage.forEach((usage, index) => {
+                const emp = employees.find(e => e.id === usage.employeeId);
+                if (emp) {
+                    tableHtml += `
+                        <tr class="border-t hover:bg-gray-50">
+                            <td class="p-3 font-semibold text-gray-500">${index + 1}</td>
+                            <td class="p-3">
+                                <span class="bg-blue-100 px-3 py-1 rounded-full font-mono font-semibold text-blue-700">
+                                    ${usage.time}
+                                </span>
+                            </td>
+                            <td class="p-3 font-semibold">${emp.name}</td>
+                            <td class="p-3 text-gray-600">${emp.department}</td>
+                            <td class="p-3 text-sm text-gray-500">${emp.employeeId}</td>
+                        </tr>
+                    `;
+                }
+            });
+            
+            tableHtml += `
+                        </tbody>
+                    </table>
+                </div>
+            `;
+            
+            tableElement.innerHTML = tableHtml;
+        };
 
         window.useTicketNow = async function() {
             const today = new Date().toISOString().split('T')[0];
@@ -340,6 +464,34 @@
                                 <div class="bg-orange-100 p-4 rounded">
                                     <p class="text-sm">Total BD</p>
                                     <p class="text-3xl font-bold">${employees.length}</p>
+                                </div>
+                            </div>
+
+                            <div class="bg-gradient-to-r from-cyan-50 to-blue-50 border-2 border-cyan-200 rounded-lg p-6 mb-6">
+                                <div class="flex justify-between items-center mb-4">
+                                    <h3 class="text-xl font-bold flex items-center gap-2">
+                                        📊 Control de Uso Diario
+                                    </h3>
+                                    <button onclick="toggleDailyUsage()" id="toggleDailyBtn" 
+                                        class="bg-cyan-600 text-white px-4 py-2 rounded-lg hover:bg-cyan-700 flex items-center gap-2">
+                                        <span id="toggleIcon">▼</span>
+                                        <span id="toggleText">Minimizar</span>
+                                    </button>
+                                </div>
+                                <div class="flex gap-3 items-end flex-wrap">
+                                    <div class="flex-1 min-w-64">
+                                        <label class="block text-sm font-semibold mb-2">Seleccionar fecha:</label>
+                                        <input type="date" id="usageDate" value="${new Date().toISOString().split('T')[0]}" 
+                                            onchange="updateDailyUsage(this.value)"
+                                            class="w-full p-3 border-2 rounded-lg">
+                                    </div>
+                                    <div class="bg-white rounded-lg p-4 border-2 border-cyan-300">
+                                        <p class="text-sm text-gray-600">Tickets usados</p>
+                                        <p class="text-4xl font-black text-cyan-600" id="dailyCount">0</p>
+                                    </div>
+                                </div>
+                                <div id="dailyUsageContainer" class="mt-4">
+                                    <div id="dailyUsageTable"></div>
                                 </div>
                             </div>
 
@@ -1030,15 +1182,19 @@
             console.log('URL completa:', window.location.href);
             console.log('Parámetro QR:', qrFromUrl);
             
-            // Mostrar pantalla de carga si viene de QR
-            if (qrFromUrl) {
+            // Verificar si hay sesión guardada
+            const savedUserType = localStorage.getItem('userType');
+            const savedUserId = localStorage.getItem('userId');
+            const savedUserCode = localStorage.getItem('userCode');
+            
+            // Mostrar pantalla de carga
+            if (qrFromUrl || savedUserType) {
                 document.getElementById('app').innerHTML = `
                     <div class="min-h-screen bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center p-4">
                         <div class="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full text-center">
                             <div class="text-6xl mb-4">⏳</div>
                             <h2 class="text-2xl font-bold mb-2">Cargando...</h2>
-                            <p class="text-gray-600">Accediendo con código:</p>
-                            <p class="font-mono font-bold text-blue-600 mt-2">${qrFromUrl}</p>
+                            <p class="text-gray-600">${qrFromUrl ? `Accediendo con código: ${qrFromUrl}` : 'Restaurando sesión...'}</p>
                             <div class="mt-6">
                                 <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
                             </div>
@@ -1052,6 +1208,7 @@
             
             console.log('Empleados cargados:', employees.length);
             
+            // Prioridad 1: QR desde URL
             if (qrFromUrl) {
                 // Limpiar la URL
                 window.history.replaceState({}, document.title, window.location.pathname);
@@ -1065,11 +1222,22 @@
                     // Login automático exitoso
                     userType = 'employee';
                     currentUser = emp;
+                    
+                    // Guardar sesión
+                    localStorage.setItem('userType', 'employee');
+                    localStorage.setItem('userId', emp.id);
+                    localStorage.setItem('userCode', qrFromUrl);
+                    
                     renderEmployee();
                 } else if (qrFromUrl === ADMIN_CODE) {
                     // Login como admin
                     userType = 'admin';
                     currentUser = { name: 'Administrador' };
+                    
+                    // Guardar sesión
+                    localStorage.setItem('userType', 'admin');
+                    localStorage.setItem('userCode', qrFromUrl);
+                    
                     renderAdmin();
                 } else {
                     // Código no válido - mostrar login con el código
@@ -1079,8 +1247,31 @@
                         alert(`⚠️ Código QR no encontrado: ${qrFromUrl}\n\nVerifica que esté registrado en el sistema o que hayas escaneado el código correcto.`);
                     }, 100);
                 }
-            } else {
-                // Login normal sin QR
+            } 
+            // Prioridad 2: Sesión guardada
+            else if (savedUserType) {
+                if (savedUserType === 'admin') {
+                    userType = 'admin';
+                    currentUser = { name: 'Administrador' };
+                    renderAdmin();
+                } else if (savedUserType === 'employee' && savedUserId) {
+                    const emp = employees.find(e => e.id === savedUserId);
+                    if (emp) {
+                        userType = 'employee';
+                        currentUser = emp;
+                        renderEmployee();
+                    } else {
+                        // Usuario no encontrado, limpiar sesión
+                        localStorage.clear();
+                        renderLogin();
+                        alert('⚠️ Tu sesión expiró. Por favor, inicia sesión nuevamente.');
+                    }
+                } else {
+                    renderLogin();
+                }
+            } 
+            // Sin QR ni sesión: mostrar login normal
+            else {
                 renderLogin();
             }
         });
