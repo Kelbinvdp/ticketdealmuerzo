@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sistema de Tickets de Almuerzo - Firebase</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 <body>
     <div id="app"></div>
@@ -494,6 +495,32 @@
             }
         };
 
+        window.downloadDailyReport = function() {
+    const selectedDate = document.getElementById('usageDate')?.value || new Date().toISOString().split('T')[0];
+    const dayUsage = ticketUsage.filter(u => u.date === selectedDate);
+    
+    if (dayUsage.length === 0) {
+        alert('📭 No hay datos para descargar');
+        return;
+    }
+    
+    const excelData = dayUsage.map((usage, index) => {
+        const emp = employees.find(e => e.id === usage.employeeId);
+        return {
+            'No.': index + 1,
+            'Fecha': formatLocalDate(usage.date),
+            'Hora': usage.time,
+            'Colaborador': emp?.name || 'N/A',
+            'Departamento': emp?.department || 'N/A'
+        };
+    });
+    
+    const ws = XLSX.utils.json_to_sheet(excelData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Uso Diario');
+    XLSX.writeFile(wb, `Uso_Diario_${selectedDate}.xlsx`);
+};
+
         window.updateDailyUsage = function(selectedDate) {
             currentSelectedDate = selectedDate;
             const dayUsage = ticketUsage.filter(u => u.date === selectedDate);
@@ -697,7 +724,6 @@
                             <div class="flex gap-2 mb-4 flex-wrap">
                                 <button onclick="showAddEmp()" class="bg-blue-600 text-white px-6 py-3 rounded-lg">➕ Agregar</button>
                                 <button onclick="showUploadExcel()" class="bg-green-600 text-white px-6 py-3 rounded-lg">📤 Cargar Excel</button>
-                                <button onclick="printAllQRs()" class="bg-purple-600 text-white px-6 py-3 rounded-lg">🖨️ Imprimir QRs</button>
                             </div>
                             
                             <div class="border rounded-lg overflow-hidden mb-6">
