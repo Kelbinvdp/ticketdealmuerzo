@@ -34,7 +34,7 @@
         let employees = [];
         let tickets = [];
         let ticketUsage = [];
-        let selectedMonth = '2025-01';
+        let selectedMonth = '2025-10';
         let dailyUsageExpanded = true;
         let currentSelectedDate = new Date().toISOString().split('T')[0];
         const ADMIN_CODE = 'ADMIN2025';
@@ -98,7 +98,8 @@
 
         function getMonths() {
             const months = [];
-            for (let i = 0; i < 24; i++) {
+            // Desde octubre 2025 (mes 9) hasta diciembre 2028 (39 meses)
+            for (let i = 9; i < 48; i++) {
                 const d = new Date(2025, i, 1);
                 const key = d.toISOString().slice(0, 7);
                 const name = d.toLocaleDateString('es', { month: 'long', year: 'numeric' });
