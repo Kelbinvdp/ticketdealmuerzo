@@ -695,15 +695,21 @@
 
                             <div class="bg-gradient-to-r from-cyan-50 to-blue-50 border-2 border-cyan-200 rounded-lg p-6 mb-6">
                                 <div class="flex justify-between items-center mb-4">
-                                    <h3 class="text-xl font-bold flex items-center gap-2">
-                                        📊 Control de Uso Diario
-                                    </h3>
-                                    <button onclick="toggleDailyUsage()" id="toggleDailyBtn" 
-                                        class="bg-cyan-600 text-white px-4 py-2 rounded-lg hover:bg-cyan-700 flex items-center gap-2">
-                                        <span id="toggleIcon">▼</span>
-                                        <span id="toggleText">Minimizar</span>
-                                    </button>
-                                </div>
+    <h3 class="text-xl font-bold flex items-center gap-2 text-[#1F2533]">
+        📊 Control de Uso Diario
+    </h3>
+    <div class="flex gap-2">
+        <button onclick="downloadDailyReport()" 
+            class="bg-[#570D4C] text-white px-4 py-2 rounded-lg hover:bg-[#570D4C]/80 transition-colors flex items-center gap-2">
+            📥 Descargar
+        </button>
+        <button onclick="toggleDailyUsage()" id="toggleDailyBtn" 
+            class="bg-[#1F4456] text-white px-4 py-2 rounded-lg hover:bg-[#1F2533] transition-colors flex items-center gap-2">
+            <span id="toggleIcon">▼</span>
+            <span id="toggleText">Minimizar</span>
+        </button>
+    </div>
+</div>
                                 <div class="flex gap-3 items-end flex-wrap">
                                     <div class="flex-1 min-w-64">
                                         <label class="block text-sm font-semibold mb-2">Seleccionar fecha:</label>
