@@ -118,6 +118,14 @@
         function formatLocalDate(dateStr, options = {}) {
             return parseLocalDate(dateStr).toLocaleDateString('es', options);
         }
+        // Función para obtener la fecha local actual en formato YYYY-MM-DD
+        function getTodayLocal() {
+            const now = new Date();
+            const year = now.getFullYear();
+            const month = String(now.getMonth() + 1).padStart(2, '0');
+            const day = String(now.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        }
 
         // LOGIN
         function renderLogin() {
@@ -475,7 +483,7 @@
             
             // Inicializar el uso diario con la fecha de hoy
             setTimeout(() => {
-                updateDailyUsage(new Date().toISOString().split('T')[0]);
+                updateDailyUsage(getTodayLocal());
             }, 100);
         }
 
@@ -598,13 +606,14 @@
             tableElement.innerHTML = tableHtml;
         };
 
-        window.useTicketNow = async function() {
-            const today = new Date().toISOString().split('T')[0];
+            window.useTicketNow = async function() {
+            const today = getTodayLocal(); // 
             const ticket = tickets.find(t => t.employeeId === currentUser.id && t.status === 'active' && parseLocalDate(t.expirationDate) >= new Date());
             
             if (!ticket) { alert('No tienes ticket activo'); return; }
             if (ticketUsage.find(u => u.employeeId === currentUser.id && u.date === today)) { alert('Ya usaste tu ticket hoy'); return; }
-            
+            // ... resto del código
+                    
             // Verificar si tiene límite y si se agotaron
             if (ticket.hasLimit && (ticket.usedDays || 0) >= ticket.maxTickets) {
                 alert('🚫 Tickets agotados. Contacta con el administrador.');
@@ -714,7 +723,7 @@
                                 <div class="flex gap-3 items-end flex-wrap">
                                     <div class="flex-1 min-w-64">
                                         <label class="block text-sm font-semibold mb-2">Seleccionar fecha:</label>
-                                        <input type="date" id="usageDate" value="${new Date().toISOString().split('T')[0]}" 
+                                        <input type="date" id="usageDate" value="${getTodayLocal()}"  
                                             onchange="updateDailyUsage(this.value)"
                                             class="w-full p-3 border-2 rounded-lg">
                                     </div>
